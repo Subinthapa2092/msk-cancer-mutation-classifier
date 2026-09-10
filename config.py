@@ -1,48 +1,44 @@
 """
-Central configuration for the MSK "Redefining Cancer Treatment" project.
-Edit the paths below to match where you downloaded the Kaggle competition
-files (msk-redefining-cancer-treatment).
+Central configuration for the Kaggle "Histopathologic Cancer Detection"
+project (PatchCamelyon-derived). Edit the paths below to match where you
+downloaded the competition files.
 """
 
 import os
-
-# --- Dataset paths -------------------------------------------------------
-# Expected files (from the Kaggle competition, unzipped into data/):
-#   data/training_variants          (ID, Gene, Variation, Class)
-#   data/training_text              (ID||Text, pipe-delimited)
-#   data/test_variants   (optional, for the Kaggle leaderboard submission)
-#   data/test_text        (optional, for the Kaggle leaderboard submission)
+## 
+# --- Dataset paths ---------------------------------------------------------
+# Expected layout (from `kaggle competitions download -c
+# histopathologic-cancer-detection`, unzipped into data/):
+#   data/train_labels.csv     (id, label)  -- label is 1 if the center
+#                                              32x32px region of the patch
+#                                              contains tumor tissue
+#   data/train/<id>.tif        96x96x3 RGB patches, ~130k+ files
+#   data/test/<id>.tif         unlabeled patches for the Kaggle leaderboard
 DATA_DIR = "data"
-TRAIN_VARIANTS_PATH = os.path.join(DATA_DIR, "training_variants")
-TRAIN_TEXT_PATH = os.path.join(DATA_DIR, "training_text")
-TEST_VARIANTS_PATH = os.path.join(DATA_DIR, "test_variants")
-TEST_TEXT_PATH = os.path.join(DATA_DIR, "test_text")
+TRAIN_DIR = os.path.join(DATA_DIR, "train")
+TEST_DIR = os.path.join(DATA_DIR, "test")
+TRAIN_LABELS_PATH = os.path.join(DATA_DIR, "train_labels.csv")
 
-NUM_CLASSES = 9  # classes are labeled 1-9 in the raw data
+IMAGE_SIZE = 96          # native patch size; do not upsample needlessly
+IMAGE_CHANNELS = 3
+NUM_CLASSES = 2           # binary: tumor present / not present
 
-# --- Split ----------------------------------------------------------------
+# --- Split -------------------------------------------------------------------
 VAL_SIZE = 0.15
 TEST_SIZE = 0.15
 RANDOM_STATE = 42
 
-# --- Text / tokenization ---------------------------------------------------
-MAX_VOCAB_SIZE = 30000
-MAX_SEQUENCE_LENGTH = 1500   # truncate/pad clinical-text excerpts to this many tokens
-EMBEDDING_DIM = 128
-
-# --- Training hyperparameters ----------------------------------------------
-BATCH_SIZE = 16              # dataset is small (~3300 rows); keep batches modest
-EPOCHS = 30
+# --- Training hyperparameters -------------------------------------------------
+BATCH_SIZE = 64
+EPOCHS = 20
 LEARNING_RATE = 1e-3
 
-# --- Output paths -----------------------------------------------------------
+# --- Output paths ---------------------------------------------------------------
 MODEL_DIR = "models"
-# TextVectorization is a layer inside the CNN model, so its vocabulary is
-# saved and restored automatically with the model -- no separate tokenizer
-# file needed.
-CNN_MODEL_PATH = os.path.join(MODEL_DIR, "text_cnn.keras")
-BASELINE_MODEL_PATH = os.path.join(MODEL_DIR, "tfidf_logreg_baseline.joblib")
+CNN_MODEL_PATH = os.path.join(MODEL_DIR, "histopath_cnn.keras")
+BASELINE_MODEL_PATH = os.path.join(MODEL_DIR, "color_hist_logreg_baseline.joblib")
 
 OUTPUTS_DIR = "outputs"
 TRAINING_CURVE_PATH = os.path.join(OUTPUTS_DIR, "training_curves.png")
+ROC_CURVE_PATH = os.path.join(OUTPUTS_DIR, "roc_curve.png")
 CONFUSION_MATRIX_PATH = os.path.join(OUTPUTS_DIR, "confusion_matrix.png")

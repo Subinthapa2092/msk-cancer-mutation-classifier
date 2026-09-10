@@ -1,5 +1,5 @@
 services:
-  msk-cancer-classifier:
+  histopathologic-cancer-cnn:
     build: .
     volumes:
       - ./data:/app/data

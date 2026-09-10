@@ -1,8 +1,0 @@
-services:
-  msk-cancer-classifier:
-    build: .
-    volumes:
-      - ./data:/app/data
-      - ./models:/app/models
-      - ./outputs:/app/outputs
-    command: python -m src.train

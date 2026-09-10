@@ -1,7 +1,9 @@
 data/
 models/
 outputs/
+venv/
 __pycache__/
 *.pyc
-venv/
+.git/
 .ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/

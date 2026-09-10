@@ -1,65 +1,105 @@
 """
-1D CNN for classifying clinical-literature text into one of 9 mutation
-classes.
+CNN architectures for 96x96x3 binary tumor-patch classification.
 
-Input Text -> TextVectorization (int sequences) -> Embedding
-  -> [Conv1D(kernel=k) -> GlobalMaxPooling1D] for k in (3, 4, 5)   (Kim, 2014 style)
-  -> Concatenate -> Dropout -> Dense(128) -> Dropout -> Dense(9, softmax)
+Two options, both compiled the same way (binary_crossentropy, AUC as the
+tracked metric since that's the competition's own scoring metric):
 
-Multiple parallel kernel sizes let the network pick up short phrases
-(kernel=3) and longer motifs (kernel=5) in the same pass, which tends to
-beat a single-kernel-size CNN on this kind of variable-length scientific
-text.
+  build_cnn_from_scratch()
+      A compact VGG-style stack: [Conv-Conv-Pool] x 4 with BatchNorm,
+      GlobalAveragePooling instead of Flatten (fewer params, less
+      overfitting risk with a dataset this size relative to a big FC
+      head), Dropout, single sigmoid output.
 
-NOTE ON SUITABILITY: this architecture is included because the assignment
-calls for a CNN. On this exact dataset, gradient-boosted trees over
-TF-IDF/Word2Vec features and transformer encoders (e.g. BioBERT) have
-outperformed CNN-based text classifiers in published writeups -- see the
-README for citations and the included TF-IDF + Logistic Regression
-baseline in src/baseline.py, which you should treat as the credibility
-check on this model's log-loss, not as a discardable extra.
+  build_transfer_model(backbone)
+      A pretrained ImageNet backbone (frozen initially) + a small
+      classification head. On a task like this -- natural-ish RGB
+      textures, hundreds of thousands of training images available in
+      the real dataset -- transfer learning consistently outperforms a
+      from-scratch CNN in published results on this exact competition,
+      so this is the one worth reaching for if you have the real data
+      and a GPU.
 """
 
 from tensorflow import keras
 from tensorflow.keras import layers
 
 
-def build_text_cnn(
-    vectorize_layer: layers.TextVectorization,
-    vocab_size: int,
-    num_classes: int = 9,
-    embedding_dim: int = 128,
+def build_cnn_from_scratch(
+    image_size: int = 96,
+    channels: int = 3,
     learning_rate: float = 1e-3,
 ) -> keras.Model:
-    inputs = keras.Input(shape=(1,), dtype="string")
+    inputs = keras.Input(shape=(image_size, image_size, channels))
 
-    x = vectorize_layer(inputs)
-    x = layers.Embedding(input_dim=vocab_size, output_dim=embedding_dim, mask_zero=False)(x)
+    x = layers.Rescaling(1.0 / 255)(inputs)
 
-    conv_blocks = []
-    for kernel_size in (3, 4, 5):
-        conv = layers.Conv1D(
-            filters=128,
-            kernel_size=kernel_size,
-            activation="relu",
-            padding="valid",
-        )(x)
-        pooled = layers.GlobalMaxPooling1D()(conv)
-        conv_blocks.append(pooled)
+    for filters in (32, 64, 128, 256):
+        x = layers.Conv2D(filters, 3, padding="same", activation="relu")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.Conv2D(filters, 3, padding="same", activation="relu")(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.MaxPooling2D()(x)
 
-    concatenated = layers.Concatenate()(conv_blocks) if len(conv_blocks) > 1 else conv_blocks[0]
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dropout(0.5)(x)
+    x = layers.Dense(256, activation="relu")(x)
+    x = layers.Dropout(0.3)(x)
+    outputs = layers.Dense(1, activation="sigmoid")(x)
 
-    x = layers.Dropout(0.4)(concatenated)
-    x = layers.Dense(128, activation="relu")(x)
-    x = layers.Dropout(0.4)(x)
-    outputs = layers.Dense(num_classes, activation="softmax")(x)
-
-    model = keras.Model(inputs, outputs, name="clinical_text_cnn")
+    model = keras.Model(inputs, outputs, name="histopath_cnn_from_scratch")
 
     model.compile(
         optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
-        loss="sparse_categorical_crossentropy",
-        metrics=["accuracy"],
+        loss="binary_crossentropy",
+        metrics=[keras.metrics.AUC(name="auc"), "accuracy"],
     )
+    return model
 
+
+def build_transfer_model(
+    backbone: str = "mobilenet_v2",
+    image_size: int = 96,
+    channels: int = 3,
+    learning_rate: float = 1e-4,
+    freeze_backbone: bool = True,
+) -> keras.Model:
+    backbones = {
+        "mobilenet_v2": keras.applications.MobileNetV2,
+        "efficientnet_b0": keras.applications.EfficientNetB0,
+        "resnet50": keras.applications.ResNet50,
+    }
+    if backbone not in backbones:
+        raise ValueError(f"Unknown backbone '{backbone}'. Choose from {list(backbones)}.")
+
+    inputs = keras.Input(shape=(image_size, image_size, channels))
+
+    base_model = backbones[backbone](
+        include_top=False, weights="imagenet", input_shape=(image_size, image_size, channels)
+    )
+    base_model.trainable = not freeze_backbone
+
+    # Each Keras application has its own expected preprocessing; using the
+    # matching one (rather than a generic /255 rescale) matters for
+    # transfer-learning accuracy.
+    preprocess_fn = {
+        "mobilenet_v2": keras.applications.mobilenet_v2.preprocess_input,
+        "efficientnet_b0": keras.applications.efficientnet.preprocess_input,
+        "resnet50": keras.applications.resnet50.preprocess_input,
+    }[backbone]
+
+    x = layers.Lambda(preprocess_fn)(inputs)
+    x = base_model(x, training=False)
+    x = layers.GlobalAveragePooling2D()(x)
+    x = layers.Dropout(0.4)(x)
+    x = layers.Dense(128, activation="relu")(x)
+    x = layers.Dropout(0.3)(x)
+    outputs = layers.Dense(1, activation="sigmoid")(x)
+
+    model = keras.Model(inputs, outputs, name=f"histopath_{backbone}_transfer")
+
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=learning_rate),
+        loss="binary_crossentropy",
+        metrics=[keras.metrics.AUC(name="auc"), "accuracy"],
+    )
     return model
